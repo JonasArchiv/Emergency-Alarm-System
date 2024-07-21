@@ -1,7 +1,11 @@
-import configparser
+import unittest
+from tests.ping_test import PingTestCase
+from tests.apikeycheck_test import APIKeyCheckTestCase
 
-config = configparser.ConfigParser()
-config.read('test_config.ini')
+if __name__ == '__main__':
+    suite = unittest.TestSuite()
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(PingTestCase))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(APIKeyCheckTestCase))
 
-base_url = config['TEST_SETTINGS']['URL'] + ':' + config['TEST_SETTINGS']['PORT']
-print(base_url)
+    runner = unittest.TextTestRunner(verbosity=2)
+    runner.run(suite)
