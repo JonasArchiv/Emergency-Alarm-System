@@ -34,7 +34,7 @@ def apikey_check():
         return jsonify({"valid": False}), 404
 
 
-@app.route('api/v1/ping', methods=['GET'])
+@app.route('/api/v1/ping', methods=['GET'])
 def ping():
     response = {
         "status": "online",
