@@ -1,8 +1,9 @@
 import configparser
 import random
 import string
+from datetime import datetime
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 
@@ -23,11 +24,12 @@ class User(db.Model):
     name = db.Column(db.String(80), nullable=False)
     username = db.Column(db.String(80), unique=True, nullable=True)
     email = db.Column(db.String(120), unique=True, nullable=True)
-    role = db.Column(db.String(50), nullable=False)
+    role = db.Column(db.String(50), nullable=False)  # normal, space_admin, alarmed
     last_alert_sent = db.Column(db.DateTime, nullable=True)
     position = db.Column(db.String(120), nullable=True)
     space_id = db.Column(db.Integer, db.ForeignKey('space.id'), nullable=False)
     space = db.relationship('Space', back_populates='users')
+    alarms = db.relationship('Alarm', back_populates='user', lazy=True)
 
 
 class Space(db.Model):
@@ -35,6 +37,19 @@ class Space(db.Model):
     api_key = db.Column(db.String(80), unique=True, nullable=False)
     name = db.Column(db.String(120), unique=True, nullable=False)
     users = db.relationship('User', back_populates='space', lazy=True)
+    alarms = db.relationship('Alarm', back_populates='space', lazy=True)
+
+
+class Alarm(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message = db.Column(db.String(200), nullable=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    position = db.Column(db.String(200), nullable=False)
+    level = db.Column(db.Integer, nullable=False)  # 0: info, 1: warning, 2: critical
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user = db.relationship('User', back_populates='alarms')
+    space_id = db.Column(db.Integer, db.ForeignKey('space.id'), nullable=False)
+    space = db.relationship('Space', back_populates='alarms')
 
 
 def generate_api_key():
@@ -69,7 +84,41 @@ def add_space():
     return render_template('add_space.html')
 
 
-# API routes
+@app.route('/spaces/list', methods=['GET'])
+def list_spaces():
+    spaces = Space.query.all()
+    space_list = [{"id": space.id, "name": space.name, "api_key": space.api_key} for space in spaces]
+    return jsonify(space_list), 200
+
+
+@app.route('/spaces/<int:space_id>/users', methods=['GET'])
+def list_space_users(space_id):
+    api_key = request.headers.get('API-Key')
+    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
+
+    if not space:
+        return jsonify({"error": "Invalid API key or space does not exist"}), 403
+
+    users = User.query.filter_by(space_id=space.id).all()
+    user_list = [
+        {"id": user.id, "prename": user.prename, "name": user.name, "username": user.username, "email": user.email,
+         "role": user.role} for user in users]
+    return jsonify(user_list), 200
+
+
+@app.route('/spaces/<int:space_id>/alarms', methods=['GET'])
+def list_space_alarms(space_id):
+    api_key = request.headers.get('API-Key')
+    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
+
+    if not space:
+        return jsonify({"error": "Invalid API key or space does not exist"}), 403
+
+    alarms = Alarm.query.filter_by(space_id=space.id).all()
+    alarm_list = [{"id": alarm.id, "message": alarm.message, "timestamp": alarm.timestamp, "position": alarm.position,
+                   "level": alarm.level, "user_id": alarm.user_id} for alarm in alarms]
+    return jsonify(alarm_list), 200
+
 
 @app.route('/api/v1/apikeycheck', methods=['POST'])
 def apikey_check():
