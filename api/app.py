@@ -2,6 +2,7 @@ import configparser
 import random
 import string
 from datetime import datetime
+import requests
 
 from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
@@ -46,7 +47,7 @@ class Alarm(db.Model):
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     position = db.Column(db.String(200), nullable=False)
     level = db.Column(db.Integer, nullable=False)  # 0: info, 1: warning, 2: critical
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     user = db.relationship('User', back_populates='alarms')
     space_id = db.Column(db.Integer, db.ForeignKey('space.id'), nullable=False)
     space = db.relationship('Space', back_populates='alarms')
@@ -198,7 +199,31 @@ def emergency_alarm():
     db.session.add(new_alarm)
     db.session.commit()
 
+    notify_users(space.id, new_alarm)
+
     return jsonify({"message": "Emergency alarm created successfully", "alarm_id": new_alarm.id}), 201
+
+
+def notify_users(space_id, alarm):
+    users_to_notify = User.query.filter(
+        User.space_id == space_id,
+        User.role.in_(['space_admin', 'alarmed'])
+    ).all()
+
+    notification_url = config['NOTIFICATION_SERVICE']['url']
+
+    for user in users_to_notify:
+        payload = {
+            "message": alarm.message,
+            "position": alarm.position,
+            "level": alarm.level,
+            "timestamp": alarm.timestamp.isoformat()
+        }
+
+        try:
+            requests.post(f"{notification_url}/{user.id}", json=payload)
+        except requests.RequestException as e:
+            app.logger.error(f"Failed to send notification to user {user.id}: {e}")
 
 
 if __name__ == '__main__':
