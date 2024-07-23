@@ -28,6 +28,61 @@ class Notification(db.Model):
     user = db.relationship('User', back_populates='notifications')
 
 
+@app.route('/users/add', methods=['POST'])
+def add_user():
+    username = request.json.get('username')
+    email = request.json.get('email')
+
+    if not username or not email:
+        return jsonify({"error": "Username and email are required"}), 400
+
+    if User.query.filter_by(username=username).first() or User.query.filter_by(email=email).first():
+        return jsonify({"error": "Username or email already exists"}), 409
+
+    new_user = User(username=username, email=email)
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({"message": "User created successfully", "user_id": new_user.id}), 201
+
+
+@app.route('/notify/<int:user_id>', methods=['POST'])
+def notify_user(user_id):
+    message = request.json.get('message')
+
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    new_notification = Notification(message=message, user_id=user_id)
+    db.session.add(new_notification)
+    db.session.commit()
+
+    # Emit notification via WebSocket
+    socketio.emit('notification', {
+        "user_id": user_id,
+        "message": message,
+        "timestamp": new_notification.timestamp.isoformat()
+    }, namespace='/notify')
+
+    return jsonify({"message": "Notification sent successfully"}), 201
+
+
+@app.route('/users/<int:user_id>/notifications', methods=['GET'])
+def get_user_notifications(user_id):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    notifications = Notification.query.filter_by(user_id=user_id).all()
+    notification_list = [{"id": n.id, "message": n.message, "timestamp": n.timestamp} for n in notifications]
+
+    return jsonify(notification_list), 200
+
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()

@@ -138,6 +138,18 @@ def add_user():
     db.session.add(new_user)
     db.session.commit()
 
+    notify_url = config['NOTIFICATION_SERVICE']['url']
+
+    notify_response = requests.post(
+        notify_url,
+        json={
+            'username': username,
+            'email': email
+        }
+    )
+    if notify_response.status_code != 201:
+        return jsonify({"error": "Failed to create user in notification system"}), 500
+
     return jsonify({"message": "User created successfully", "user_id": new_user.id}), 201
 
 
@@ -201,29 +213,23 @@ def emergency_alarm():
 
     notify_users(space.id, new_alarm)
 
-    return jsonify({"message": "Emergency alarm created successfully", "alarm_id": new_alarm.id}), 201
+    return jsonify({"message": "Emergency alarm created successfully"}), 201
 
 
 def notify_users(space_id, alarm):
-    users_to_notify = User.query.filter(
-        User.space_id == space_id,
-        User.role.in_(['space_admin', 'alarmed'])
-    ).all()
+    users = User.query.filter_by(space_id=space_id).all()
+    notify_url = config['NOTIFICATION_SERVICE']['url']
 
-    notification_url = config['NOTIFICATION_SERVICE']['url']
-
-    for user in users_to_notify:
-        payload = {
-            "message": alarm.message,
-            "position": alarm.position,
-            "level": alarm.level,
-            "timestamp": alarm.timestamp.isoformat()
-        }
-
-        try:
-            requests.post(f"{notification_url}/{user.id}", json=payload)
-        except requests.RequestException as e:
-            app.logger.error(f"Failed to send notification to user {user.id}: {e}")
+    for user in users:
+        if user.role == 'alarmed':
+            notify_response = requests.post(
+                f'{notify_url}/{user.id}',
+                json={
+                    'message': f'Alarm from {alarm.position}: {alarm.message}',
+                }
+            )
+            if notify_response.status_code != 201:
+                print(f"Failed to notify user {user.id}")
 
 
 if __name__ == '__main__':
