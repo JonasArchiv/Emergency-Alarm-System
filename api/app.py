@@ -91,35 +91,6 @@ def list_spaces():
     return jsonify(space_list), 200
 
 
-@app.route('/spaces/<int:space_id>/users', methods=['GET'])
-def list_space_users(space_id):
-    api_key = request.headers.get('API-Key')
-    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
-
-    if not space:
-        return jsonify({"error": "Invalid API key or space does not exist"}), 403
-
-    users = User.query.filter_by(space_id=space.id).all()
-    user_list = [
-        {"id": user.id, "prename": user.prename, "name": user.name, "username": user.username, "email": user.email,
-         "role": user.role} for user in users]
-    return jsonify(user_list), 200
-
-
-@app.route('/spaces/<int:space_id>/alarms', methods=['GET'])
-def list_space_alarms(space_id):
-    api_key = request.headers.get('API-Key')
-    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
-
-    if not space:
-        return jsonify({"error": "Invalid API key or space does not exist"}), 403
-
-    alarms = Alarm.query.filter_by(space_id=space.id).all()
-    alarm_list = [{"id": alarm.id, "message": alarm.message, "timestamp": alarm.timestamp, "position": alarm.position,
-                   "level": alarm.level, "user_id": alarm.user_id} for alarm in alarms]
-    return jsonify(alarm_list), 200
-
-
 @app.route('/api/v1/apikeycheck', methods=['POST'])
 def apikey_check():
     api_key = request.json.get('api_key')
@@ -167,6 +138,67 @@ def add_user():
     db.session.commit()
 
     return jsonify({"message": "User created successfully", "user_id": new_user.id}), 201
+
+
+@app.route('/api/v1/spaces/<int:space_id>/alarms', methods=['GET'])
+def get_space_alarms(space_id):
+    api_key = request.headers.get('API-Key')
+    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
+
+    if not space:
+        return jsonify({"error": "Invalid API key or space does not exist"}), 403
+
+    alarms = Alarm.query.filter_by(space_id=space.id).all()
+    alarm_list = [{"id": alarm.id, "message": alarm.message, "timestamp": alarm.timestamp, "position": alarm.position,
+                   "level": alarm.level, "user_id": alarm.user_id} for alarm in alarms]
+    return jsonify(alarm_list), 200
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users', methods=['GET'])
+def get_space_users(space_id):
+    api_key = request.headers.get('API-Key')
+    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
+
+    if not space:
+        return jsonify({"error": "Invalid API key or space does not exist"}), 403
+
+    users = User.query.filter_by(space_id=space.id).all()
+    user_list = [
+        {"id": user.id, "prename": user.prename, "name": user.name, "username": user.username, "email": user.email,
+         "role": user.role} for user in users]
+    return jsonify(user_list), 200
+
+
+@app.route('/api/v1/emergency', methods=['POST'])
+def emergency_alarm():
+    api_key = request.json.get('api_key')
+    position = request.json.get('position')
+    message = request.json.get('message')
+    level = request.json.get('level')
+    user_id = request.json.get('user_id')
+
+    if not api_key or not position or not message or level is None or not user_id:
+        return jsonify({"error": "API key, position, message, level, and user_id are required"}), 400
+
+    space = Space.query.filter_by(api_key=api_key).first()
+    if not space:
+        return jsonify({"error": "Invalid API key"}), 403
+
+    user = User.query.filter_by(id=user_id, space_id=space.id).first()
+    if not user:
+        return jsonify({"error": "Invalid user or user not associated with the space"}), 403
+
+    new_alarm = Alarm(
+        message=message,
+        position=position,
+        level=level,
+        space_id=space.id,
+        user_id=user.id
+    )
+    db.session.add(new_alarm)
+    db.session.commit()
+
+    return jsonify({"message": "Emergency alarm created successfully", "alarm_id": new_alarm.id}), 201
 
 
 if __name__ == '__main__':
