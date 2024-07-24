@@ -63,6 +63,11 @@ def generate_api_key():
     return '-'.join(sections)
 
 
+@app.route('/')
+def index():
+    return render_template('notify_widget.html')
+
+
 @app.route('/spaces/add', methods=['GET', 'POST'])
 def add_space():
     if request.method == 'POST':
