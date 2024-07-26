@@ -87,7 +87,7 @@ class AlarmScreen(BoxLayout):
                 'api_key': api_key,
                 'position': 'Location XYZ',
                 'message': self.message_input.text,
-                'level': level,  # Alarm level based on dropdown selection
+                'level': level,
                 'user_id': user_id
             }
 

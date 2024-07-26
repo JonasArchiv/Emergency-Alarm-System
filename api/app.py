@@ -2,12 +2,14 @@ import configparser
 import random
 import string
 from datetime import datetime
+from functools import wraps
 import requests
 
 from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 
+# Load configuration
 config = configparser.ConfigParser()
 config.read('config.ini')
 
@@ -61,6 +63,24 @@ def generate_api_key():
         ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     ]
     return '-'.join(sections)
+
+
+def require_space_admin(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('API-Key')
+        space = Space.query.filter_by(api_key=api_key).first()
+        if not space:
+            return jsonify({"error": "Invalid API key"}), 403
+
+        user_id = request.headers.get('User-ID')
+        user = User.query.filter_by(id=user_id, space_id=space.id, role='space_admin').first()
+        if not user:
+            return jsonify({"error": "Admin privileges required"}), 403
+
+        return f(*args, **kwargs)
+
+    return decorated_function
 
 
 @app.route('/')
@@ -173,18 +193,83 @@ def get_space_alarms(space_id):
 
 
 @app.route('/api/v1/spaces/<int:space_id>/users', methods=['GET'])
-def get_space_users(space_id):
-    api_key = request.headers.get('API-Key')
-    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
-
-    if not space:
-        return jsonify({"error": "Invalid API key or space does not exist"}), 403
-
-    users = User.query.filter_by(space_id=space.id).all()
+@require_space_admin
+def get_users(space_id):
+    users = User.query.filter_by(space_id=space_id).all()
     user_list = [
         {"id": user.id, "prename": user.prename, "name": user.name, "username": user.username, "email": user.email,
          "role": user.role} for user in users]
     return jsonify(user_list), 200
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users/add', methods=['POST'])
+@require_space_admin
+def add_user_to_space(space_id):
+    prename = request.json.get('prename')
+    name = request.json.get('name')
+    username = request.json.get('username')
+    email = request.json.get('email')
+    role = request.json.get('role')
+
+    if not prename or not name or not username or not role:
+        return jsonify({"error": "Prename, name, username, and role are required"}), 400
+
+    space = Space.query.get(space_id)
+    if not space:
+        return jsonify({"error": "Space not found"}), 404
+
+    if User.query.filter_by(username=username).first() or (email and User.query.filter_by(email=email).first()):
+        return jsonify({"error": "Username or email already exists"}), 409
+
+    new_user = User(prename=prename, name=name, username=username, email=email, role=role, space_id=space.id)
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({"message": "User added successfully", "user_id": new_user.id}), 201
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users/<int:user_id>', methods=['PUT'])
+@require_space_admin
+def edit_user(space_id, user_id):
+    user = User.query.filter_by(id=user_id, space_id=space_id).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    prename = request.json.get('prename')
+    name = request.json.get('name')
+    username = request.json.get('username')
+    email = request.json.get('email')
+    role = request.json.get('role')
+
+    if prename:
+        user.prename = prename
+    if name:
+        user.name = name
+    if username:
+        if User.query.filter_by(username=username).first():
+            return jsonify({"error": "Username already exists"}), 409
+        user.username = username
+    if email:
+        if User.query.filter_by(email=email).first():
+            return jsonify({"error": "Email already exists"}), 409
+        user.email = email
+    if role:
+        user.role = role
+
+    db.session.commit()
+    return jsonify({"message": "User updated successfully"}), 200
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users/<int:user_id>', methods=['DELETE'])
+@require_space_admin
+def delete_user(space_id, user_id):
+    user = User.query.filter_by(id=user_id, space_id=space_id).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"message": "User deleted successfully"}), 200
 
 
 @app.route('/api/v1/emergency', methods=['POST'])
