@@ -1,17 +1,51 @@
-import requests
 import configparser
+import requests
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.label import Label
+from kivy.uix.spinner import Spinner  # Import Spinner
 from kivy.uix.screenmanager import ScreenManager, Screen
-from kivy.uix.spinner import Spinner
 
+# Load configuration
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-API_URL = config['API']['url']
+API_URL = config.get('API', 'url', fallback='http://127.0.0.1:7070')
+
+
+class LoginScreen(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+
+        self.api_key_input = TextInput(hint_text='API Key', multiline=False)
+        self.user_id_input = TextInput(hint_text='User ID', multiline=False)
+        self.login_button = Button(text='Login', on_press=self.verify_credentials)
+        self.result_label = Label()
+
+        self.add_widget(self.api_key_input)
+        self.add_widget(self.user_id_input)
+        self.add_widget(self.login_button)
+        self.add_widget(self.result_label)
+
+    def verify_credentials(self, instance):
+        api_key = self.api_key_input.text
+        user_id = self.user_id_input.text
+        headers = {'API-Key': api_key, 'User-ID': user_id}
+
+        try:
+            response = requests.post(f'{API_URL}/api/v1/apikeycheck', json={'api_key': api_key})
+            if response.status_code == 200 and response.json().get('valid'):
+                config['USER'] = {'api_key': api_key, 'user_id': user_id}
+                with open('config.ini', 'w') as configfile:
+                    config.write(configfile)
+                self.parent.current = 'home'
+            else:
+                self.result_label.text = 'Invalid API key or User ID'
+        except requests.exceptions.RequestException as e:
+            self.result_label.text = 'Error connecting to server'
 
 
 class HomeScreen(BoxLayout):
@@ -55,18 +89,21 @@ class ViewUsersScreen(BoxLayout):
         self.add_widget(self.back_button)
 
     def refresh_users(self, instance):
-        api_key = "your_api_key_here"  # Replace with actual API key
-        user_id = "admin_user_id_here"  # Replace with actual User ID
+        api_key = config['USER']['api_key']
+        user_id = config['USER']['user_id']
         headers = {'API-Key': api_key, 'User-ID': user_id}
 
-        response = requests.get(f'{API_URL}/api/v1/spaces/1/users', headers=headers)
-        if response.status_code == 200:
-            users = response.json()
-            users_text = "\n".join(
-                [f"ID: {user['id']}, Username: {user['username']}, Role: {user['role']}" for user in users])
-            self.result_label.text = users_text
-        else:
-            self.result_label.text = "Failed to retrieve users"
+        try:
+            response = requests.get(f'{API_URL}/api/v1/spaces/1/users', headers=headers)
+            if response.status_code == 200:
+                users = response.json()
+                users_text = "\n".join(
+                    [f"ID: {user['id']}, Username: {user['username']}, Role: {user['role']}" for user in users])
+                self.result_label.text = users_text
+            else:
+                self.result_label.text = "Failed to retrieve users"
+        except requests.exceptions.RequestException as e:
+            self.result_label.text = "Error connecting to server"
 
     def go_back(self, instance):
         self.parent.current = 'home'
@@ -103,28 +140,31 @@ class AddUserScreen(BoxLayout):
         username = self.username_input.text
         email = self.email_input.text
         role = self.role_spinner.text
-        api_key = "your_api_key_here"  # Replace with actual API key
-        user_id = "admin_user_id_here"  # Replace with actual User ID
+        api_key = config['USER']['api_key']
+        user_id = config['USER']['user_id']
         headers = {'API-Key': api_key, 'User-ID': user_id}
 
         if not prename or not name or not username or not role:
             self.result_label.text = "Prename, name, username, and role are required"
             return
 
-        response = requests.post(f'{API_URL}/api/v1/spaces/1/users/add', json={
-            'prename': prename,
-            'name': name,
-            'username': username,
-            'email': email,
-            'role': role
-        }, headers=headers)
+        try:
+            response = requests.post(f'{API_URL}/api/v1/spaces/1/users/add', json={
+                'prename': prename,
+                'name': name,
+                'username': username,
+                'email': email,
+                'role': role
+            }, headers=headers)
 
-        if response.status_code == 201:
-            self.result_label.text = "User added successfully"
-        elif response.status_code == 403:
-            self.result_label.text = "Admin privileges required"
-        else:
-            self.result_label.text = "Failed to add user"
+            if response.status_code == 201:
+                self.result_label.text = "User added successfully"
+            elif response.status_code == 403:
+                self.result_label.text = "Admin privileges required"
+            else:
+                self.result_label.text = "Failed to add user"
+        except requests.exceptions.RequestException as e:
+            self.result_label.text = "Error connecting to server"
 
     def go_back(self, instance):
         self.parent.current = 'home'
@@ -164,24 +204,27 @@ class EditUserScreen(BoxLayout):
         username = self.username_input.text
         email = self.email_input.text
         role = self.role_spinner.text
-        api_key = "your_api_key_here"  # Replace with actual API key
-        admin_user_id = "admin_user_id_here"  # Replace with actual User ID
+        api_key = config['USER']['api_key']
+        admin_user_id = config['USER']['user_id']
         headers = {'API-Key': api_key, 'User-ID': admin_user_id}
 
-        response = requests.put(f'{API_URL}/api/v1/spaces/1/users/{user_id}', json={
-            'prename': prename,
-            'name': name,
-            'username': username,
-            'email': email,
-            'role': role
-        }, headers=headers)
+        try:
+            response = requests.put(f'{API_URL}/api/v1/spaces/1/users/{user_id}', json={
+                'prename': prename,
+                'name': name,
+                'username': username,
+                'email': email,
+                'role': role
+            }, headers=headers)
 
-        if response.status_code == 200:
-            self.result_label.text = "User edited successfully"
-        elif response.status_code == 403:
-            self.result_label.text = "Admin privileges required"
-        else:
-            self.result_label.text = "Failed to edit user"
+            if response.status_code == 200:
+                self.result_label.text = "User edited successfully"
+            elif response.status_code == 403:
+                self.result_label.text = "Admin privileges required"
+            else:
+                self.result_label.text = "Failed to edit user"
+        except requests.exceptions.RequestException as e:
+            self.result_label.text = "Error connecting to server"
 
     def go_back(self, instance):
         self.parent.current = 'home'
@@ -203,18 +246,21 @@ class DeleteUserScreen(BoxLayout):
 
     def delete_user(self, instance):
         user_id = self.user_id_input.text
-        api_key = "your_api_key_here"  # Replace with actual API key
-        admin_user_id = "admin_user_id_here"  # Replace with actual User ID
+        api_key = config['USER']['api_key']
+        admin_user_id = config['USER']['user_id']
         headers = {'API-Key': api_key, 'User-ID': admin_user_id}
 
-        response = requests.delete(f'{API_URL}/api/v1/spaces/1/users/{user_id}', headers=headers)
+        try:
+            response = requests.delete(f'{API_URL}/api/v1/spaces/1/users/{user_id}', headers=headers)
 
-        if response.status_code == 200:
-            self.result_label.text = "User deleted successfully"
-        elif response.status_code == 403:
-            self.result_label.text = "Admin privileges required"
-        else:
-            self.result_label.text = "Failed to delete user"
+            if response.status_code == 200:
+                self.result_label.text = "User deleted successfully"
+            elif response.status_code == 403:
+                self.result_label.text = "Admin privileges required"
+            else:
+                self.result_label.text = "Failed to delete user"
+        except requests.exceptions.RequestException as e:
+            self.result_label.text = "Error connecting to server"
 
     def go_back(self, instance):
         self.parent.current = 'home'
@@ -223,6 +269,11 @@ class DeleteUserScreen(BoxLayout):
 class SpaceAdminApp(App):
     def build(self):
         self.screen_manager = ScreenManager()
+
+        self.login_screen = LoginScreen()
+        screen0 = Screen(name='login')
+        screen0.add_widget(self.login_screen)
+        self.screen_manager.add_widget(screen0)
 
         self.home_screen = HomeScreen()
         screen1 = Screen(name='home')
