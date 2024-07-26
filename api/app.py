@@ -237,6 +237,25 @@ def notify_users(space_id, alarm):
                 print(f"Failed to notify user {user.id}")
 
 
+@app.route('/api/v1/verify_user', methods=['POST'])
+def verify_user():
+    api_key = request.json.get('api_key')
+    username = request.json.get('username')
+
+    if not api_key or not username:
+        return jsonify({"error": "API key and username are required"}), 400
+
+    space = Space.query.filter_by(api_key=api_key).first()
+    if not space:
+        return jsonify({"error": "Invalid API key"}), 404
+
+    user = User.query.filter_by(username=username, space_id=space.id).first()
+    if user:
+        return jsonify({"valid": True, "user_id": user.id}), 200
+    else:
+        return jsonify({"valid": False}), 404
+
+
 if __name__ == '__main__':
     if config['DATABASE'].getboolean('AutoUpdate'):
         with app.app_context():
