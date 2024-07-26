@@ -13,6 +13,7 @@ config.read('config.ini')
 
 API_URL = config['API']['url']
 
+
 class HomeScreen(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -61,10 +62,102 @@ class ViewUsersScreen(BoxLayout):
         response = requests.get(f'{API_URL}/api/v1/spaces/1/users', headers=headers)
         if response.status_code == 200:
             users = response.json()
-            users_text = "\n".join([f"ID: {user['id']}, Username: {user['username']}, Role: {user['role']}" for user in users])
+            users_text = "\n".join(
+                [f"ID: {user['id']}, Username: {user['username']}, Role: {user['role']}" for user in users])
             self.result_label.text = users_text
         else:
             self.result_label.text = "Failed to retrieve users"
+
+    def go_back(self, instance):
+        self.parent.current = 'home'
+
+
+class AddUserScreen(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.prename_input = TextInput(hint_text='Prename', multiline=False)
+        self.name_input = TextInput(hint_text='Name', multiline=False)
+        self.username_input = TextInput(hint_text='Username', multiline=False)
+        self.email_input = TextInput(hint_text='Email', multiline=False)
+        self.role_spinner = Spinner(
+            text='Select Role',
+            values=('normal', 'space_admin', 'alarmed')
+        )
+        self.result_label = Label()
+        self.add_button = Button(text='Add User', on_press=self.add_user)
+        self.back_button = Button(text='Back', on_press=self.go_back)
+
+        self.add_widget(self.prename_input)
+        self.add_widget(self.name_input)
+        self.add_widget(self.username_input)
+        self.add_widget(self.email_input)
+        self.add_widget(self.role_spinner)
+        self.add_widget(self.result_label)
+        self.add_widget(self.add_button)
+        self.add_widget(self.back_button)
+
+    def add_user(self, instance):
+        prename = self.prename_input.text
+        name = self.name_input.text
+        username = self.username_input.text
+        email = self.email_input.text
+        role = self.role_spinner.text
+        api_key = "your_api_key_here"  # Replace with actual API key
+        user_id = "admin_user_id_here"  # Replace with actual User ID
+        headers = {'API-Key': api_key, 'User-ID': user_id}
+
+        if not prename or not name or not username or not role:
+            self.result_label.text = "Prename, name, username, and role are required"
+            return
+
+        response = requests.post(f'{API_URL}/api/v1/spaces/1/users/add', json={
+            'prename': prename,
+            'name': name,
+            'username': username,
+            'email': email,
+            'role': role
+        }, headers=headers)
+
+        if response.status_code == 201:
+            self.result_label.text = "User added successfully"
+        elif response.status_code == 403:
+            self.result_label.text = "Admin privileges required"
+        else:
+            self.result_label.text = "Failed to add user"
+
+    def go_back(self, instance):
+        self.parent.current = 'home'
+
+
+class DeleteUserScreen(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.user_id_input = TextInput(hint_text='User ID', multiline=False)
+        self.result_label = Label()
+        self.delete_button = Button(text='Delete User', on_press=self.delete_user)
+        self.back_button = Button(text='Back', on_press=self.go_back)
+
+        self.add_widget(self.user_id_input)
+        self.add_widget(self.result_label)
+        self.add_widget(self.delete_button)
+        self.add_widget(self.back_button)
+
+    def delete_user(self, instance):
+        user_id = self.user_id_input.text
+        api_key = "your_api_key_here"  # Replace with actual API key
+        admin_user_id = "admin_user_id_here"  # Replace with actual User ID
+        headers = {'API-Key': api_key, 'User-ID': admin_user_id}
+
+        response = requests.delete(f'{API_URL}/api/v1/spaces/1/users/{user_id}', headers=headers)
+
+        if response.status_code == 200:
+            self.result_label.text = "User deleted successfully"
+        elif response.status_code == 403:
+            self.result_label.text = "Admin privileges required"
+        else:
+            self.result_label.text = "Failed to delete user"
 
     def go_back(self, instance):
         self.parent.current = 'home'
