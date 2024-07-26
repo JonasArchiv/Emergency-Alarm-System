@@ -1,306 +1,348 @@
 import configparser
+import random
+import string
+from datetime import datetime
+from functools import wraps
 import requests
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.spinner import Spinner
-from kivy.uix.screenmanager import ScreenManager, Screen
 
+from flask import Flask, request, jsonify, render_template
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+
+# Load configuration
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-API_URL = config.get('API', 'url', fallback='http://127.0.0.1:7070')
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = config['DATABASE']['SQLALCHEMY_DATABASE_URI']
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
 
-class LoginScreen(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-
-        self.api_key_input = TextInput(hint_text='API Key', multiline=False)
-        self.user_id_input = TextInput(hint_text='User ID', multiline=False)
-        self.login_button = Button(text='Login', on_press=self.verify_credentials)
-        self.result_label = Label()
-
-        self.add_widget(self.api_key_input)
-        self.add_widget(self.user_id_input)
-        self.add_widget(self.login_button)
-        self.add_widget(self.result_label)
-
-    def verify_credentials(self, instance):
-        api_key = self.api_key_input.text
-        user_id = self.user_id_input.text
-        headers = {'API-Key': api_key, 'User-ID': user_id}
-
-        try:
-            response = requests.post(f'{API_URL}/api/v1/apikeycheck', json={'api_key': api_key})
-            if response.status_code == 200 and response.json().get('valid'):
-                config['USER'] = {'api_key': api_key, 'user_id': user_id}
-                with open('config.ini', 'w') as configfile:
-                    config.write(configfile)
-                self.parent.current = 'home'
-            else:
-                self.result_label.text = 'Invalid API key or User ID'
-        except requests.exceptions.RequestException as e:
-            self.result_label.text = 'Error connecting to server'
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    prename = db.Column(db.String(80), nullable=False)
+    name = db.Column(db.String(80), nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=True)
+    email = db.Column(db.String(120), unique=True, nullable=True)
+    role = db.Column(db.String(50), nullable=False)  # normal, space_admin, alarmed
+    last_alert_sent = db.Column(db.DateTime, nullable=True)
+    position = db.Column(db.String(120), nullable=True)
+    space_id = db.Column(db.Integer, db.ForeignKey('space.id'), nullable=False)
+    space = db.relationship('Space', back_populates='users')
+    alarms = db.relationship('Alarm', back_populates='user', lazy=True)
 
 
-class HomeScreen(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-
-        self.view_users_button = Button(text='View Users', on_press=self.view_users)
-        self.add_user_button = Button(text='Add User', on_press=self.add_user)
-        self.edit_user_button = Button(text='Edit User', on_press=self.edit_user)
-        self.delete_user_button = Button(text='Delete User', on_press=self.delete_user)
-
-        self.add_widget(self.view_users_button)
-        self.add_widget(self.add_user_button)
-        self.add_widget(self.edit_user_button)
-        self.add_widget(self.delete_user_button)
-
-    def view_users(self, instance):
-        self.parent.current = 'view_users'
-
-    def add_user(self, instance):
-        self.parent.current = 'add_user'
-
-    def edit_user(self, instance):
-        self.parent.current = 'edit_user'
-
-    def delete_user(self, instance):
-        self.parent.current = 'delete_user'
+class Space(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    api_key = db.Column(db.String(80), unique=True, nullable=False)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    users = db.relationship('User', back_populates='space', lazy=True)
+    alarms = db.relationship('Alarm', back_populates='space', lazy=True)
 
 
-class ViewUsersScreen(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.result_label = Label()
-        self.refresh_button = Button(text='Refresh', on_press=self.refresh_users)
-        self.back_button = Button(text='Back', on_press=self.go_back)
-
-        self.add_widget(self.refresh_button)
-        self.add_widget(self.result_label)
-        self.add_widget(self.back_button)
-
-    def refresh_users(self, instance):
-        api_key = config['USER']['api_key']
-        user_id = config['USER']['user_id']
-        headers = {'API-Key': api_key, 'User-ID': user_id}
-
-        try:
-            response = requests.get(f'{API_URL}/api/v1/spaces/1/users', headers=headers)
-            if response.status_code == 200:
-                users = response.json()
-                users_text = "\n".join(
-                    [f"ID: {user['id']}, Username: {user['username']}, Role: {user['role']}" for user in users])
-                self.result_label.text = users_text
-            else:
-                self.result_label.text = "Failed to retrieve users"
-        except requests.exceptions.RequestException as e:
-            self.result_label.text = "Error connecting to server"
-
-    def go_back(self, instance):
-        self.parent.current = 'home'
+class Alarm(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message = db.Column(db.String(200), nullable=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    position = db.Column(db.String(200), nullable=False)
+    level = db.Column(db.Integer, nullable=False)  # 0: info, 1: warning, 2: critical
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    user = db.relationship('User', back_populates='alarms')
+    space_id = db.Column(db.Integer, db.ForeignKey('space.id'), nullable=False)
+    space = db.relationship('Space', back_populates='alarms')
 
 
-class AddUserScreen(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.prename_input = TextInput(hint_text='Prename', multiline=False)
-        self.name_input = TextInput(hint_text='Name', multiline=False)
-        self.username_input = TextInput(hint_text='Username', multiline=False)
-        self.email_input = TextInput(hint_text='Email', multiline=False)
-        self.role_spinner = Spinner(
-            text='Select Role',
-            values=('normal', 'space_admin', 'alarmed')
-        )
-        self.result_label = Label()
-        self.add_button = Button(text='Add User', on_press=self.add_user)
-        self.back_button = Button(text='Back', on_press=self.go_back)
-
-        self.add_widget(self.prename_input)
-        self.add_widget(self.name_input)
-        self.add_widget(self.username_input)
-        self.add_widget(self.email_input)
-        self.add_widget(self.role_spinner)
-        self.add_widget(self.result_label)
-        self.add_widget(self.add_button)
-        self.add_widget(self.back_button)
-
-    def add_user(self, instance):
-        prename = self.prename_input.text
-        name = self.name_input.text
-        username = self.username_input.text
-        email = self.email_input.text
-        role = self.role_spinner.text
-        api_key = config['USER']['api_key']
-        user_id = config['USER']['user_id']
-        headers = {'API-Key': api_key, 'User-ID': user_id}
-
-        if not prename or not name or not username or not role:
-            self.result_label.text = "Prename, name, username, and role are required"
-            return
-
-        try:
-            response = requests.post(f'{API_URL}/api/v1/spaces/1/users/add', json={
-                'prename': prename,
-                'name': name,
-                'username': username,
-                'email': email,
-                'role': role
-            }, headers=headers)
-
-            if response.status_code == 201:
-                self.result_label.text = "User added successfully"
-            elif response.status_code == 403:
-                self.result_label.text = "Admin privileges required"
-            else:
-                self.result_label.text = "Failed to add user"
-        except requests.exceptions.RequestException as e:
-            self.result_label.text = "Error connecting to server"
-
-    def go_back(self, instance):
-        self.parent.current = 'home'
+def generate_api_key():
+    sections = [
+        ''.join(random.choices(string.ascii_uppercase + string.digits, k=4)),
+        ''.join(random.choices(string.ascii_uppercase + string.digits, k=5)),
+        ''.join(random.choices(string.ascii_uppercase + string.digits, k=5)),
+        ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    ]
+    return '-'.join(sections)
 
 
-class EditUserScreen(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.user_id_input = TextInput(hint_text='User ID', multiline=False)
-        self.prename_input = TextInput(hint_text='Prename', multiline=False)
-        self.name_input = TextInput(hint_text='Name', multiline=False)
-        self.username_input = TextInput(hint_text='Username', multiline=False)
-        self.email_input = TextInput(hint_text='Email', multiline=False)
-        self.role_spinner = Spinner(
-            text='Select Role',
-            values=('normal', 'space_admin', 'alarmed')
-        )
-        self.result_label = Label()
-        self.edit_button = Button(text='Edit User', on_press=self.edit_user)
-        self.back_button = Button(text='Back', on_press=self.go_back)
+def require_space_admin(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('API-Key')
+        space = Space.query.filter_by(api_key=api_key).first()
+        if not space:
+            return jsonify({"error": "Invalid API key"}), 403
 
-        self.add_widget(self.user_id_input)
-        self.add_widget(self.prename_input)
-        self.add_widget(self.name_input)
-        self.add_widget(self.username_input)
-        self.add_widget(self.email_input)
-        self.add_widget(self.role_spinner)
-        self.add_widget(self.result_label)
-        self.add_widget(self.edit_button)
-        self.add_widget(self.back_button)
+        user_id = request.headers.get('User-ID')
+        user = User.query.filter_by(id=user_id, space_id=space.id, role='space_admin').first()
+        if not user:
+            return jsonify({"error": "Admin privileges required"}), 403
 
-    def edit_user(self, instance):
-        user_id = self.user_id_input.text
-        prename = self.prename_input.text
-        name = self.name_input.text
-        username = self.username_input.text
-        email = self.email_input.text
-        role = self.role_spinner.text
-        api_key = config['USER']['api_key']
-        admin_user_id = config['USER']['user_id']
-        headers = {'API-Key': api_key, 'User-ID': admin_user_id}
+        return f(*args, **kwargs)
 
-        try:
-            response = requests.put(f'{API_URL}/api/v1/spaces/1/users/{user_id}', json={
-                'prename': prename,
-                'name': name,
-                'username': username,
-                'email': email,
-                'role': role
-            }, headers=headers)
-
-            if response.status_code == 200:
-                self.result_label.text = "User edited successfully"
-            elif response.status_code == 403:
-                self.result_label.text = "Admin privileges required"
-            else:
-                self.result_label.text = "Failed to edit user"
-        except requests.exceptions.RequestException as e:
-            self.result_label.text = "Error connecting to server"
-
-    def go_back(self, instance):
-        self.parent.current = 'home'
+    return decorated_function
 
 
-class DeleteUserScreen(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.user_id_input = TextInput(hint_text='User ID', multiline=False)
-        self.result_label = Label()
-        self.delete_button = Button(text='Delete User', on_press=self.delete_user)
-        self.back_button = Button(text='Back', on_press=self.go_back)
-
-        self.add_widget(self.user_id_input)
-        self.add_widget(self.result_label)
-        self.add_widget(self.delete_button)
-        self.add_widget(self.back_button)
-
-    def delete_user(self, instance):
-        user_id = self.user_id_input.text
-        api_key = config['USER']['api_key']
-        admin_user_id = config['USER']['user_id']
-        headers = {'API-Key': api_key, 'User-ID': admin_user_id}
-
-        try:
-            response = requests.delete(f'{API_URL}/api/v1/spaces/1/users/{user_id}', headers=headers)
-
-            if response.status_code == 200:
-                self.result_label.text = "User deleted successfully"
-            elif response.status_code == 403:
-                self.result_label.text = "Admin privileges required"
-            else:
-                self.result_label.text = "Failed to delete user"
-        except requests.exceptions.RequestException as e:
-            self.result_label.text = "Error connecting to server"
-
-    def go_back(self, instance):
-        self.parent.current = 'home'
+@app.route('/')
+def index():
+    return render_template('notify_widget.html')
 
 
-class SpaceAdminApp(App):
-    def build(self):
-        self.screen_manager = ScreenManager()
+@app.route('/spaces/add', methods=['GET', 'POST'])
+def add_space():
+    if request.method == 'POST':
+        name = request.form.get('name')
+        password = request.form.get('password')
 
-        self.login_screen = LoginScreen()
-        screen0 = Screen(name='login')
-        screen0.add_widget(self.login_screen)
-        self.screen_manager.add_widget(screen0)
+        if password != config['ADMIN']['password']:
+            return jsonify({"error": "Invalid admin password"}), 403
 
-        self.home_screen = HomeScreen()
-        screen1 = Screen(name='home')
-        screen1.add_widget(self.home_screen)
-        self.screen_manager.add_widget(screen1)
+        if not name:
+            return jsonify({"error": "Space name is required"}), 400
 
-        self.view_users_screen = ViewUsersScreen()
-        screen2 = Screen(name='view_users')
-        screen2.add_widget(self.view_users_screen)
-        self.screen_manager.add_widget(screen2)
+        api_key = generate_api_key()
+        new_space = Space(name=name, api_key=api_key)
+        db.session.add(new_space)
+        db.session.commit()
 
-        self.add_user_screen = AddUserScreen()
-        screen3 = Screen(name='add_user')
-        screen3.add_widget(self.add_user_screen)
-        self.screen_manager.add_widget(screen3)
+        return jsonify({"message": "Space created successfully", "api_key": api_key}), 201
 
-        self.edit_user_screen = EditUserScreen()
-        screen4 = Screen(name='edit_user')
-        screen4.add_widget(self.edit_user_screen)
-        self.screen_manager.add_widget(screen4)
+    return render_template('add_space.html')
 
-        self.delete_user_screen = DeleteUserScreen()
-        screen5 = Screen(name='delete_user')
-        screen5.add_widget(self.delete_user_screen)
-        self.screen_manager.add_widget(screen5)
 
-        return self.screen_manager
+@app.route('/spaces/list', methods=['GET'])
+def list_spaces():
+    spaces = Space.query.all()
+    space_list = [{"id": space.id, "name": space.name, "api_key": space.api_key} for space in spaces]
+    return jsonify(space_list), 200
+
+
+@app.route('/api/v1/apikeycheck', methods=['POST'])
+def apikey_check():
+    api_key = request.json.get('api_key')
+    if not api_key:
+        return jsonify({"error": "API key is required"}), 400
+
+    space = Space.query.filter_by(api_key=api_key).first()
+    if space:
+        return jsonify({"valid": True}), 200
+    else:
+        return jsonify({"valid": False}), 404
+
+
+@app.route('/api/v1/ping', methods=['GET'])
+def ping():
+    response = {
+        "status": "online",
+        "build_version": config['API_V1']['build_version'],
+        "react": "pong",
+    }
+    return jsonify(response), 200
+
+
+@app.route('/api/v1/users/add', methods=['POST'])
+def add_user():
+    api_key = request.json.get('api_key')
+    prename = request.json.get('prename')
+    name = request.json.get('name')
+    username = request.json.get('username')
+    email = request.json.get('email')
+    role = request.json.get('role')
+
+    if not api_key or not prename or not name or not username or not role:
+        return jsonify({"error": "API key, prename, name, username, and role are required"}), 400
+
+    space = Space.query.filter_by(api_key=api_key).first()
+    if not space:
+        return jsonify({"error": "Invalid API key"}), 404
+
+    if User.query.filter_by(username=username).first() or (email and User.query.filter_by(email=email).first()):
+        return jsonify({"error": "Username or email already exists"}), 409
+
+    new_user = User(prename=prename, name=name, username=username, email=email, role=role, space_id=space.id)
+    db.session.add(new_user)
+    db.session.commit()
+
+    notify_url = config['NOTIFICATION_SERVICE']['url']
+
+    notify_response = requests.post(
+        notify_url,
+        json={
+            'username': username,
+            'email': email
+        }
+    )
+    if notify_response.status_code != 201:
+        return jsonify({"error": "Failed to create user in notification system"}), 500
+
+    return jsonify({"message": "User created successfully", "user_id": new_user.id}), 201
+
+
+@app.route('/api/v1/spaces/<int:space_id>/alarms', methods=['GET'])
+def get_space_alarms(space_id):
+    api_key = request.headers.get('API-Key')
+    space = Space.query.filter_by(id=space_id, api_key=api_key).first()
+
+    if not space:
+        return jsonify({"error": "Invalid API key or space does not exist"}), 403
+
+    alarms = Alarm.query.filter_by(space_id=space.id).all()
+    alarm_list = [{"id": alarm.id, "message": alarm.message, "timestamp": alarm.timestamp, "position": alarm.position,
+                   "level": alarm.level, "user_id": alarm.user_id} for alarm in alarms]
+    return jsonify(alarm_list), 200
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users', methods=['GET'])
+@require_space_admin
+def get_users(space_id):
+    users = User.query.filter_by(space_id=space_id).all()
+    user_list = [
+        {"id": user.id, "prename": user.prename, "name": user.name, "username": user.username, "email": user.email,
+         "role": user.role} for user in users]
+    return jsonify(user_list), 200
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users/add', methods=['POST'])
+@require_space_admin
+def add_user_to_space(space_id):
+    prename = request.json.get('prename')
+    name = request.json.get('name')
+    username = request.json.get('username')
+    email = request.json.get('email')
+    role = request.json.get('role')
+
+    if not prename or not name or not username or not role:
+        return jsonify({"error": "Prename, name, username, and role are required"}), 400
+
+    space = Space.query.get(space_id)
+    if not space:
+        return jsonify({"error": "Space not found"}), 404
+
+    if User.query.filter_by(username=username).first() or (email and User.query.filter_by(email=email).first()):
+        return jsonify({"error": "Username or email already exists"}), 409
+
+    new_user = User(prename=prename, name=name, username=username, email=email, role=role, space_id=space.id)
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({"message": "User added successfully", "user_id": new_user.id}), 201
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users/<int:user_id>', methods=['PUT'])
+@require_space_admin
+def edit_user(space_id, user_id):
+    user = User.query.filter_by(id=user_id, space_id=space_id).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    prename = request.json.get('prename')
+    name = request.json.get('name')
+    username = request.json.get('username')
+    email = request.json.get('email')
+    role = request.json.get('role')
+
+    if prename:
+        user.prename = prename
+    if name:
+        user.name = name
+    if username:
+        if User.query.filter_by(username=username).first():
+            return jsonify({"error": "Username already exists"}), 409
+        user.username = username
+    if email:
+        if User.query.filter_by(email=email).first():
+            return jsonify({"error": "Email already exists"}), 409
+        user.email = email
+    if role:
+        user.role = role
+
+    db.session.commit()
+    return jsonify({"message": "User updated successfully"}), 200
+
+
+@app.route('/api/v1/spaces/<int:space_id>/users/<int:user_id>', methods=['DELETE'])
+@require_space_admin
+def delete_user(space_id, user_id):
+    user = User.query.filter_by(id=user_id, space_id=space_id).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"message": "User deleted successfully"}), 200
+
+
+@app.route('/api/v1/emergency', methods=['POST'])
+def emergency_alarm():
+    api_key = request.json.get('api_key')
+    position = request.json.get('position')
+    message = request.json.get('message')
+    level = request.json.get('level')
+    user_id = request.json.get('user_id')
+
+    if not api_key or not position or not message or level is None or not user_id:
+        return jsonify({"error": "API key, position, message, level, and user_id are required"}), 400
+
+    space = Space.query.filter_by(api_key=api_key).first()
+    if not space:
+        return jsonify({"error": "Invalid API key"}), 403
+
+    user = User.query.filter_by(id=user_id, space_id=space.id).first()
+    if not user:
+        return jsonify({"error": "Invalid user or user not associated with the space"}), 403
+
+    new_alarm = Alarm(
+        message=message,
+        position=position,
+        level=level,
+        space_id=space.id,
+        user_id=user.id
+    )
+    db.session.add(new_alarm)
+    db.session.commit()
+
+    notify_users(space.id, new_alarm)
+
+    return jsonify({"message": "Emergency alarm created successfully"}), 201
+
+
+def notify_users(space_id, alarm):
+    users = User.query.filter_by(space_id=space_id).all()
+    notify_url = config['NOTIFICATION_SERVICE']['url']
+
+    for user in users:
+        if user.role == 'alarmed':
+            notify_response = requests.post(
+                f'{notify_url}/{user.id}',
+                json={
+                    'message': f'Alarm from {alarm.position}: {alarm.message}',
+                }
+            )
+            if notify_response.status_code != 201:
+                print(f"Failed to notify user {user.id}")
+
+
+@app.route('/api/v1/verify_user', methods=['POST'])
+def verify_user():
+    api_key = request.json.get('api_key')
+    username = request.json.get('username')
+
+    if not api_key or not username:
+        return jsonify({"error": "API key and username are required"}), 400
+
+    space = Space.query.filter_by(api_key=api_key).first()
+    if not space:
+        return jsonify({"error": "Invalid API key"}), 404
+
+    user = User.query.filter_by(username=username, space_id=space.id).first()
+    if user:
+        return jsonify({"valid": True, "user_id": user.id}), 200
+    else:
+        return jsonify({"valid": False}), 404
 
 
 if __name__ == '__main__':
-    SpaceAdminApp().run()
+    if config['DATABASE'].getboolean('AutoUpdate'):
+        with app.app_context():
+            db.create_all()
+    app.run(port=int(config['DEFAULT']['port']), debug=True)
