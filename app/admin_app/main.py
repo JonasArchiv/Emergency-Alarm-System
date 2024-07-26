@@ -130,6 +130,63 @@ class AddUserScreen(BoxLayout):
         self.parent.current = 'home'
 
 
+class EditUserScreen(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.user_id_input = TextInput(hint_text='User ID', multiline=False)
+        self.prename_input = TextInput(hint_text='Prename', multiline=False)
+        self.name_input = TextInput(hint_text='Name', multiline=False)
+        self.username_input = TextInput(hint_text='Username', multiline=False)
+        self.email_input = TextInput(hint_text='Email', multiline=False)
+        self.role_spinner = Spinner(
+            text='Select Role',
+            values=('normal', 'space_admin', 'alarmed')
+        )
+        self.result_label = Label()
+        self.edit_button = Button(text='Edit User', on_press=self.edit_user)
+        self.back_button = Button(text='Back', on_press=self.go_back)
+
+        self.add_widget(self.user_id_input)
+        self.add_widget(self.prename_input)
+        self.add_widget(self.name_input)
+        self.add_widget(self.username_input)
+        self.add_widget(self.email_input)
+        self.add_widget(self.role_spinner)
+        self.add_widget(self.result_label)
+        self.add_widget(self.edit_button)
+        self.add_widget(self.back_button)
+
+    def edit_user(self, instance):
+        user_id = self.user_id_input.text
+        prename = self.prename_input.text
+        name = self.name_input.text
+        username = self.username_input.text
+        email = self.email_input.text
+        role = self.role_spinner.text
+        api_key = "your_api_key_here"  # Replace with actual API key
+        admin_user_id = "admin_user_id_here"  # Replace with actual User ID
+        headers = {'API-Key': api_key, 'User-ID': admin_user_id}
+
+        response = requests.put(f'{API_URL}/api/v1/spaces/1/users/{user_id}', json={
+            'prename': prename,
+            'name': name,
+            'username': username,
+            'email': email,
+            'role': role
+        }, headers=headers)
+
+        if response.status_code == 200:
+            self.result_label.text = "User edited successfully"
+        elif response.status_code == 403:
+            self.result_label.text = "Admin privileges required"
+        else:
+            self.result_label.text = "Failed to edit user"
+
+    def go_back(self, instance):
+        self.parent.current = 'home'
+
+
 class DeleteUserScreen(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
