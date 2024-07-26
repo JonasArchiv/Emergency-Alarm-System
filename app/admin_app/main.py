@@ -1,0 +1,106 @@
+import requests
+import configparser
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.uix.spinner import Spinner
+
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+API_URL = config['API']['url']
+
+class HomeScreen(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+
+        self.view_users_button = Button(text='View Users', on_press=self.view_users)
+        self.add_user_button = Button(text='Add User', on_press=self.add_user)
+        self.edit_user_button = Button(text='Edit User', on_press=self.edit_user)
+        self.delete_user_button = Button(text='Delete User', on_press=self.delete_user)
+
+        self.add_widget(self.view_users_button)
+        self.add_widget(self.add_user_button)
+        self.add_widget(self.edit_user_button)
+        self.add_widget(self.delete_user_button)
+
+    def view_users(self, instance):
+        self.parent.current = 'view_users'
+
+    def add_user(self, instance):
+        self.parent.current = 'add_user'
+
+    def edit_user(self, instance):
+        self.parent.current = 'edit_user'
+
+    def delete_user(self, instance):
+        self.parent.current = 'delete_user'
+
+
+class ViewUsersScreen(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.result_label = Label()
+        self.refresh_button = Button(text='Refresh', on_press=self.refresh_users)
+        self.back_button = Button(text='Back', on_press=self.go_back)
+
+        self.add_widget(self.refresh_button)
+        self.add_widget(self.result_label)
+        self.add_widget(self.back_button)
+
+    def refresh_users(self, instance):
+        api_key = "your_api_key_here"  # Replace with actual API key
+        user_id = "admin_user_id_here"  # Replace with actual User ID
+        headers = {'API-Key': api_key, 'User-ID': user_id}
+
+        response = requests.get(f'{API_URL}/api/v1/spaces/1/users', headers=headers)
+        if response.status_code == 200:
+            users = response.json()
+            users_text = "\n".join([f"ID: {user['id']}, Username: {user['username']}, Role: {user['role']}" for user in users])
+            self.result_label.text = users_text
+        else:
+            self.result_label.text = "Failed to retrieve users"
+
+    def go_back(self, instance):
+        self.parent.current = 'home'
+
+
+class SpaceAdminApp(App):
+    def build(self):
+        self.screen_manager = ScreenManager()
+
+        self.home_screen = HomeScreen()
+        screen1 = Screen(name='home')
+        screen1.add_widget(self.home_screen)
+        self.screen_manager.add_widget(screen1)
+
+        self.view_users_screen = ViewUsersScreen()
+        screen2 = Screen(name='view_users')
+        screen2.add_widget(self.view_users_screen)
+        self.screen_manager.add_widget(screen2)
+
+        self.add_user_screen = AddUserScreen()
+        screen3 = Screen(name='add_user')
+        screen3.add_widget(self.add_user_screen)
+        self.screen_manager.add_widget(screen3)
+
+        self.edit_user_screen = EditUserScreen()
+        screen4 = Screen(name='edit_user')
+        screen4.add_widget(self.edit_user_screen)
+        self.screen_manager.add_widget(screen4)
+
+        self.delete_user_screen = DeleteUserScreen()
+        screen5 = Screen(name='delete_user')
+        screen5.add_widget(self.delete_user_screen)
+        self.screen_manager.add_widget(screen5)
+
+        return self.screen_manager
+
+
+if __name__ == '__main__':
+    SpaceAdminApp().run()
